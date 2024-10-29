@@ -288,118 +288,169 @@ if ((is_valid_string(opt\$exclude_samples_col)) && (is_valid_string(opt\$exclude
 
 ################################################
 ################################################
-## Run anota2seqRun()                         ##
+## CHECK CONDITIONS AND REPLICATES            ##
 ################################################
 ################################################
 
-# Separate matrix into riboseq and rnaseq data
+# Count the number of conditions and replicates
+condition_counts <- table(sample.sheet[[sample_treatment_col]])
+num_conditions <- length(condition_counts)
+min_replicates <- min(condition_counts)
 
-riboseq_samples <- sample.sheet[[opt\$sample_id_col]][sample.sheet[['type']] == 'riboseq']
-rnaseq_samples <- sample.sheet[[opt\$sample_id_col]][sample.sheet[['type']] == 'rnaseq']
-
-if (! is.null(opt\$samples_pairing_col)){
-    riboseq_samples <- riboseq_samples[order(sample.sheet[riboseq_samples, opt\$samples_pairing_col])]
-    rnaseq_samples <- rnaseq_samples[order(sample.sheet[rnaseq_samples, opt\$samples_pairing_col])]
+# Function to write a message to both console and a file
+write_message <- function(message, file = paste0(opt$output_prefix, "_anota2seq_status.txt")) {
+    cat(message, "\n")
+    writeLines(message, file)
 }
 
-riboseq_data <- count.table[,riboseq_samples]
-rnaseq_data <- count.table[,rnaseq_samples]
-
-# Make the anota2seqDataSet
-
-anota2seqDataSetFromMatrix_args <- list(
-    dataP = riboseq_data,
-    dataT = rnaseq_data,
-    phenoVec = sample.sheet[rnaseq_samples, opt\$sample_treatment_col],
-    dataType = opt\$dataType,
-    normalize = opt\$normalize,
-    transformation = opt\$transformation,
-    filterZeroGenes = opt\$filterZeroGenes,
-    varCutOff = opt\$varCutOff
-)
-
-if (! is.null(opt\$samples_batch_col)){
-    anota2seqDataSetFromMatrix_args\$batchVec <- samples[rnaseq_samples, opt\$samples_batch_col]
+# Check conditions and decide on analysis
+if (num_conditions >= 2 && min_replicates >= 3) {
+    # Proceed with analysis as normal
+    write_message("Proceeding with full anota2seq analysis.")
+    proceed_with_analysis <- TRUE
+} else if (num_conditions == 2 && min_replicates < 3) {
+    # Skip analysis with warning
+    write_message("WARNING: anota2seq needs at least three replicates within each condition when there are only two conditions. Skipping anota2seq analysis.")
+    proceed_with_analysis <- FALSE
+} else if (num_conditions > 2 && min_replicates < 3) {
+    # Run with onlyGroup = TRUE
+    write_message("WARNING: Less than three replicates detected in at least one condition. Running anota2seq with onlyGroup = TRUE.")
+    opt$onlyGroup <- TRUE
+    proceed_with_analysis <- TRUE
+} else {
+    # Unexpected case
+    write_message("ERROR: Unexpected combination of conditions and replicates. Please check your input data.")
+    quit(status = 1)
 }
 
-ads <- do.call(anota2seqDataSetFromMatrix, anota2seqDataSetFromMatrix_args)
+# Proceed with analysis only if conditions are met
+if (proceed_with_analysis) {
+    
+    ################################################
+    ################################################
+    ## Run anota2seqRun()                         ##
+    ################################################
+    ################################################
 
-# Run anota2seqRun
+    # Separate matrix into riboseq and rnaseq data
 
-contrast_matrix <- matrix(
-    nrow=2,
-    ncol=1,
-    dimnames=list(c(opt\$reference_level, opt\$target_level),c()),
-    c(-1,1)
-)
+    riboseq_samples <- sample.sheet[[opt\$sample_id_col]][sample.sheet[['type']] == 'riboseq']
+    rnaseq_samples <- sample.sheet[[opt\$sample_id_col]][sample.sheet[['type']] == 'rnaseq']
 
-ads <- anota2seqRun(
-    ads,
-    contrasts = contrast_matrix,
-    performQC = opt\$performQC,
-    onlyGroup = opt\$onlyGroup,
-    performROT = opt\$performROT,
-    generateSingleGenePlots = opt\$generateSingleGenePlots,
-    analyzeBuffering = opt\$analyzeBuffering,
-    analyzemRNA = opt\$analyzemRNA,
-    useRVM = opt\$useRVM,
-    correctionMethod = opt\$correctionMethod,
-    useProgBar = FALSE
-)
+    if (! is.null(opt\$samples_pairing_col)){
+        riboseq_samples <- riboseq_samples[order(sample.sheet[riboseq_samples, opt\$samples_pairing_col])]
+        rnaseq_samples <- rnaseq_samples[order(sample.sheet[rnaseq_samples, opt\$samples_pairing_col])]
+    }
 
-################################################
-################################################
-## Generate outputs                           ##
-################################################
-################################################
+    riboseq_data <- count.table[,riboseq_samples]
+    rnaseq_data <- count.table[,rnaseq_samples]
 
-contrast.name <-
-    paste(opt\$target_level, opt\$reference_level, sep = "_vs_")
-cat("Saving results for ", contrast.name, " ...\n", sep = "")
+    # Make the anota2seqDataSet
 
-for (analysis in c("translated mRNA", "total mRNA", "translation", "buffering", "mRNA abundance")){
+    anota2seqDataSetFromMatrix_args <- list(
+        dataP = riboseq_data,
+        dataT = rnaseq_data,
+        phenoVec = sample.sheet[rnaseq_samples, opt\$sample_treatment_col],
+        dataType = opt\$dataType,
+        normalize = opt\$normalize,
+        transformation = opt\$transformation,
+        filterZeroGenes = opt\$filterZeroGenes,
+        varCutOff = opt\$varCutOff
+    )
 
-    output <- anota2seqGetOutput(
+    if (! is.null(opt\$samples_batch_col)){
+        anota2seqDataSetFromMatrix_args\$batchVec <- samples[rnaseq_samples, opt\$samples_batch_col]
+    }
+
+    ads <- do.call(anota2seqDataSetFromMatrix, anota2seqDataSetFromMatrix_args)
+
+    # Run anota2seqRun
+
+    contrast_matrix <- matrix(
+        nrow=2,
+        ncol=1,
+        dimnames=list(c(opt\$reference_level, opt\$target_level),c()),
+        c(-1,1)
+    )
+
+    ads <- anota2seqRun(
         ads,
-        analysis = analysis,
-        output = opt\$output,
-        getRVM = opt\$getRVM,
-        selContrast = 1
+        contrasts = contrast_matrix,
+        performQC = opt\$performQC,
+        onlyGroup = opt\$onlyGroup,
+        performROT = opt\$performROT,
+        generateSingleGenePlots = opt\$generateSingleGenePlots,
+        analyzeBuffering = opt\$analyzeBuffering,
+        analyzemRNA = opt\$analyzemRNA,
+        useRVM = opt\$useRVM,
+        correctionMethod = opt\$correctionMethod,
+        useProgBar = FALSE
     )
 
-    write.table(
-        output,
-        file = paste(opt\$output_prefix, sub(' ', '_', analysis), 'anota2seq.results.tsv', sep = '.'),
-        col.names = TRUE,
-        row.names = FALSE,
-        sep = '\t',
-        quote = FALSE
+    ################################################
+    ################################################
+    ## Generate outputs                           ##
+    ################################################
+    ################################################
+
+    contrast.name <-
+        paste(opt\$target_level, opt\$reference_level, sep = "_vs_")
+    cat("Saving results for ", contrast.name, " ...\n", sep = "")
+
+    for (analysis in c("translated mRNA", "total mRNA", "translation", "buffering", "mRNA abundance")){
+
+        output <- anota2seqGetOutput(
+            ads,
+            analysis = analysis,
+            output = opt\$output,
+            getRVM = opt\$getRVM,
+            selContrast = 1
+        )
+
+        write.table(
+            output,
+            file = paste(opt\$output_prefix, sub(' ', '_', analysis), 'anota2seq.results.tsv', sep = '.'),
+            col.names = TRUE,
+            row.names = FALSE,
+            sep = '\t',
+            quote = FALSE
+        )
+    }
+
+    # Fold change plot
+
+    png(
+        file = paste(opt\$output_prefix, 'fold_change.png', sep = '.'),
+        width = 720,
+        height = 720
     )
+    anota2seqPlotFC(
+        ads,
+        visualizeRegModes = "all",
+        selContrast = 1,
+        contrastName = contrast.name,
+        plotToFile = FALSE
+    )
+    dev.off()
+
+    # R object for other processes to use
+
+    saveRDS(ads, file = paste(opt\$output_prefix, 'Anota2seqDataSet.rds', sep = '.'))
+
+    # Rename files files output by anota2seqPerformQC()
+
+    sapply(list.files(pattern = "^ANOTA2SEQ_"), function(f) file.rename(f, sub("^ANOTA2SEQ_", paste0(opt\$output_prefix, '.'), f)))
+
+} else {
+    # Create empty output files to satisfy Nextflow
+    file.create(paste0(opt$output_prefix, ".translated_mRNA.anota2seq.results.tsv"))
+    file.create(paste0(opt$output_prefix, ".total_mRNA.anota2seq.results.tsv"))
+    file.create(paste0(opt$output_prefix, ".translation.anota2seq.results.tsv"))
+    file.create(paste0(opt$output_prefix, ".buffering.anota2seq.results.tsv"))
+    file.create(paste0(opt$output_prefix, ".mRNA_abundance.anota2seq.results.tsv"))
+    file.create(paste0(opt$output_prefix, ".fold_change.png"))
+    file.create(paste0(opt$output_prefix, ".Anota2seqDataSet.rds"))
 }
-
-# Fold change plot
-
-png(
-    file = paste(opt\$output_prefix, 'fold_change.png', sep = '.'),
-    width = 720,
-    height = 720
-)
-anota2seqPlotFC(
-    ads,
-    visualizeRegModes = "all",
-    selContrast = 1,
-    contrastName = contrast.name,
-    plotToFile = FALSE
-)
-dev.off()
-
-# R object for other processes to use
-
-saveRDS(ads, file = paste(opt\$output_prefix, 'Anota2seqDataSet.rds', sep = '.'))
-
-# Rename files files output by anota2seqPerformQC()
-
-sapply(list.files(pattern = "^ANOTA2SEQ_"), function(f) file.rename(f, sub("^ANOTA2SEQ_", paste0(opt\$output_prefix, '.'), f)))
 
 ################################################
 ################################################

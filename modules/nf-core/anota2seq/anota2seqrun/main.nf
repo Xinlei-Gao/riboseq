@@ -33,5 +33,7 @@ process ANOTA2SEQ_ANOTA2SEQRUN {
     task.ext.when == null || task.ext.when
 
     script:
-    template 'anota2seqrun.r'
+    """
+    Rscript anota2seqrun.r --output_prefix ${task.ext.prefix ?: meta.id} --sample_treatment_col ${sample_treatment_col} --reference ${reference} --target ${target} --samplesheet ${samplesheet} --counts ${counts}
+    """
 }
