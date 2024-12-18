@@ -34,6 +34,6 @@ process ANOTA2SEQ_ANOTA2SEQRUN {
 
     script:
     """
-    Rscript anota2seqrun.r --output_prefix ${task.ext.prefix ?: meta.id} --sample_treatment_col ${sample_treatment_col} --reference ${reference} --target ${target} --samplesheet ${samplesheet} --counts ${counts}
+    Rscript ${projectDir}/modules/nf-core/anota2seq/anota2seqrun/templates/anota2seqrun.r --output_prefix ${task.ext.prefix ?: meta.id} --sample_treatment_col ${sample_treatment_col} --reference_level ${reference} --target_level ${target} --sample_file ${samplesheet} --count_file ${counts}
     """
 }
